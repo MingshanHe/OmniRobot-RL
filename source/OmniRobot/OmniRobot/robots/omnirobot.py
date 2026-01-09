@@ -4,7 +4,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 OMNIROBOT_CONFIG = ArticulationCfg(
-    spawn=sim_utils.UsdFileCfg(usd_path=f"/root/IsaacLab/scripts/acemate/summit_xl_omni_four.usd"),
+    spawn=sim_utils.UsdFileCfg(usd_path=f"/root/IsaacLab/scripts/OmniRobot-RL/summit_xl_omni_four.usd"),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.0)
     ),

@@ -58,6 +58,10 @@ class OmniRobotEnv(DirectRLEnv):
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
+        # add robot initliazed position
+        # self.init_root_pos = self.robot.data.root_pos_w
+        self.env_origins = self.scene.env_origins.clone()
+
         self.visualization_markers = define_markers()
 
         self.up_dir = torch.tensor([0.0, 0.0, 1.0]).cuda()  
@@ -78,17 +82,27 @@ class OmniRobotEnv(DirectRLEnv):
         self.marker_locations = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
         self.marker_offset = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
         self.marker_offset[:,-1] = 0.5
+
+        self.marker_loc = torch.randn((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_loc[:,-1] = 0.5
+        self.marker_loc = self.marker_loc + self.env_origins
         self.forward_marker_orientations = torch.zeros((self.cfg.scene.num_envs, 4)).cuda()
         self.command_marker_orientations = torch.zeros((self.cfg.scene.num_envs, 4)).cuda()
+
+        # last_distance and current_distance
+        self.last_distance = None
+        self.current_distance = None
         
 
     def _visualize_markers(self):
-        self.marker_locations = self.robot.data.root_pos_w
+        self.forward_marker_locations = self.robot.data.root_pos_w
+        self.command_marker_locations = self.marker_loc
         self.forward_marker_orientations = self.robot.data.root_quat_w
         self.command_marker_orientations = math_utils.quat_from_angle_axis(self.yaws, self.up_dir).squeeze()
-
-        loc = self.marker_locations + self.marker_offset
-        loc = torch.vstack((loc, loc))
+        # print(self.env_origins)
+        loc_forward = self.forward_marker_locations
+        loc_command = self.command_marker_locations
+        loc = torch.vstack((loc_forward, loc_command))
         rots = torch.vstack((self.forward_marker_orientations, self.command_marker_orientations))
 
         all_envs = torch.arange(self.cfg.scene.num_envs)
@@ -111,7 +125,8 @@ class OmniRobotEnv(DirectRLEnv):
         dot = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
         cross = torch.cross(self.forwards, self.commands, dim=-1)[:,-1].reshape(-1,1)
         forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
-        obs = torch.hstack((dot, cross, forward_speed))
+        distance =  torch.norm((self.robot.data.root_pos_w - self.marker_loc)[:, :2], dim=-1, keepdim=True)
+        obs = torch.hstack((dot, cross, forward_speed, distance))
         
         observations = {"policy": obs}
         return observations
@@ -119,7 +134,17 @@ class OmniRobotEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
-        total_reward = forward_reward + alignment_reward
+        self.robot.data.root_pos_w[:,-1] = 0.5
+        self.current_distance = torch.norm((self.robot.data.root_pos_w - self.marker_loc)[:, :2], dim=-1, keepdim=True)
+        if self.last_distance is None:
+            print("reset")
+            self.last_distance = self.current_distance
+            total_reward = torch.zeros((self.cfg.scene.num_envs)).cuda()
+        else:
+            distance_reward = self.last_distance - self.current_distance
+            success_bonus = (self.current_distance < 0.2).float() * 10.0
+            total_reward = 1000*distance_reward + success_bonus
+            self.last_distance = self.current_distance
         # total_reward = forward_reward*alignment_reward
         # total_reward = forward_reward*alignment_reward + forward_reward
         # total_reward = forward_reward*torch.exp(alignment_reward)
@@ -152,4 +177,7 @@ class OmniRobotEnv(DirectRLEnv):
 
         self.robot.write_root_state_to_sim(default_root_state, env_ids)
         self._visualize_markers()
+
+        self.last_distance = None
+        self.current_distance = None
 
