@@ -19,7 +19,7 @@ class OmniRobotEnvCfg(DirectRLEnvCfg):
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
     # robot(s)
-    robot_cfg: ArticulationCfg = OMNIROBOT_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot_cfg: ArticulationCfg = OMNIROBOT_CONFIG.replace(prim_path="/World/envs/env_.*/Robot")
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=100, env_spacing=2.0, replicate_physics=True)
     

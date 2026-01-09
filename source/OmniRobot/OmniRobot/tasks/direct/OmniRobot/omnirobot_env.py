@@ -43,7 +43,8 @@ class OmniRobotEnv(DirectRLEnv):
 
     def __init__(self, cfg: OmniRobotEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
-        self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_names)
+        # self.dof_idx, _ = self.robot.find_joints(self.cfg.dof_names)
+        self.dof_idx, _ = self.robot.find_joints(["fl_joint","fr_joint","rl_joint","rr_joint"])
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)

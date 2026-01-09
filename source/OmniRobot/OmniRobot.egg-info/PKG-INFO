@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: OmniRobot
+Version: 0.1.0
+Summary: OminiRobot Extension for Isaac Lab
+Home-page: 
+Author: HE MINGSHAN
+Maintainer: ACEMATE ROBOT
+License: MIT
+Keywords: extension,omnirobot,isaaclab
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Isaac Sim :: 4.5.0
+Requires-Python: >=3.10
+Requires-Dist: psutil
+Dynamic: author
+Dynamic: classifier
+Dynamic: keywords
+Dynamic: license
+Dynamic: maintainer
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
