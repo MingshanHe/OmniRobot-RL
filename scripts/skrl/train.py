@@ -95,7 +95,7 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
-import isaac_lab_tutorial.tasks  # noqa: F401
+import OmniRobot.tasks  # noqa: F401
 
 # config shortcuts
 algorithm = args_cli.algorithm.lower()
@@ -116,7 +116,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
-    print("test point....")
     # multi-gpu training config
     if args_cli.distributed:
         env_cfg.sim.device = f"cuda:{app_launcher.local_rank}"
