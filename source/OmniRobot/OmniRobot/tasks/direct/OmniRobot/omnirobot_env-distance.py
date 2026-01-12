@@ -123,33 +123,34 @@ class OmniRobotEnv(DirectRLEnv):
         self.forwards = math_utils.quat_apply(self.robot.data.root_link_quat_w, self.robot.data.FORWARD_VEC_B)
         # obs = torch.hstack((self.velocity, self.commands))
 
-        dot = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
-        cross = torch.cross(self.forwards, self.commands, dim=-1)[:,-1].reshape(-1,1)
+        dot = torch.sum(self.forward_marker_locations * self.command_marker_locations, dim=-1, keepdim=True)
+        cross = torch.cross(self.forward_marker_locations, self.command_marker_locations, dim=-1)[:,-1].reshape(-1,1)
         forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         # obs = torch.hstack((dot, cross, forward_speed))
         # observations = {"policy": obs}
 
         distance =  (self.forward_marker_locations - self.command_marker_locations)[:, :2]
-        obs = torch.hstack((distance, dot, cross))
-        observations = {"policy": obs}
+        # obs = torch.hstack((distance))
+        observations = {"policy": distance}
         return observations
 
 
     def _get_rewards(self) -> torch.Tensor:
         forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
-        alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
-
+        alignment_reward = torch.sum(self.forward_marker_locations * self.command_marker_locations, dim=-1, keepdim=True)
+        total_reward = alignment_reward
+        # total_reward = forward_reward*alignment_reward
+        # total_reward = forward_reward*alignment_reward + forward_reward
+        # total_reward = forward_reward*torch.exp(alignment_reward)
         self.current_distance = torch.norm((self.forward_marker_locations - self.command_marker_locations)[:, :2], dim=-1, keepdim=True)
-
         if self.last_distance is None:
             print("reset")
             self.last_distance = self.current_distance
             total_reward = torch.zeros((self.cfg.scene.num_envs)).cuda()
         else:
             distance_reward = self.last_distance - self.current_distance
-            success_bonus = (self.current_distance < 0.2).float() * 5.0
-            self.success_buffer =  (self.current_distance.squeeze(-1) < 0.2)
-            total_reward = 1000*distance_reward + success_bonus + 10*alignment_reward
+            success_bonus = (self.current_distance < 0.2).float() * 10.0
+            total_reward = 1000*distance_reward + success_bonus
             self.last_distance = self.current_distance
         return total_reward 
 

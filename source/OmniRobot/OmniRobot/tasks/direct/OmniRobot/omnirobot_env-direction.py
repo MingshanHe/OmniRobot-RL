@@ -126,11 +126,8 @@ class OmniRobotEnv(DirectRLEnv):
         dot = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
         cross = torch.cross(self.forwards, self.commands, dim=-1)[:,-1].reshape(-1,1)
         forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
-        # obs = torch.hstack((dot, cross, forward_speed))
-        # observations = {"policy": obs}
-
-        distance =  (self.forward_marker_locations - self.command_marker_locations)[:, :2]
-        obs = torch.hstack((distance, dot, cross))
+        obs = torch.hstack((dot, cross, forward_speed))
+        
         observations = {"policy": obs}
         return observations
 
@@ -138,19 +135,10 @@ class OmniRobotEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         forward_reward = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
-
-        self.current_distance = torch.norm((self.forward_marker_locations - self.command_marker_locations)[:, :2], dim=-1, keepdim=True)
-
-        if self.last_distance is None:
-            print("reset")
-            self.last_distance = self.current_distance
-            total_reward = torch.zeros((self.cfg.scene.num_envs)).cuda()
-        else:
-            distance_reward = self.last_distance - self.current_distance
-            success_bonus = (self.current_distance < 0.2).float() * 5.0
-            self.success_buffer =  (self.current_distance.squeeze(-1) < 0.2)
-            total_reward = 1000*distance_reward + success_bonus + 10*alignment_reward
-            self.last_distance = self.current_distance
+        total_reward = forward_reward + alignment_reward
+        # total_reward = forward_reward*alignment_reward
+        # total_reward = forward_reward*alignment_reward + forward_reward
+        # total_reward = forward_reward*torch.exp(alignment_reward)
         return total_reward 
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
