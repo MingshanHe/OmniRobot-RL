@@ -96,6 +96,7 @@ class OmniRobotEnv(DirectRLEnv):
         self.success_buffer = torch.zeros(self.cfg.scene.num_envs, device=self.device, dtype=torch.bool)
         self.success_bonus_flag = torch.ones(self.cfg.scene.num_envs, device=self.device, dtype=torch.bool)
         self.success_dist = 0.05
+        self.success_vel  = 0.1
         
 
     def _visualize_markers(self):
@@ -131,12 +132,13 @@ class OmniRobotEnv(DirectRLEnv):
         forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         # obs = torch.hstack((dot, cross, forward_speed))
 
-
         distance =  (self.forward_marker_locations - self.command_marker_locations)[:, :2]
+        distance_norm = torch.norm((self.forward_marker_locations - self.command_marker_locations)[:, :2], dim=-1, keepdim=True)
+        obs = torch.hstack((distance,distance_norm))
         # obs = torch.hstack((distance, dot, cross))
         # observations = {"policy": obs}
         
-        observations = {"policy": distance}
+        observations = {"policy": obs}
         return observations
 
 
@@ -153,14 +155,15 @@ class OmniRobotEnv(DirectRLEnv):
             self.reset_flag = False
         else:
             distance_trend = self.last_distance - self.current_distance
-            distance_reward = distance_trend*1000.0
-            # distance_reward = (distance_trend > 0).float() * 1.0 + (distance_trend <= 0).float() * -1.0
-            success_bonus = (self.current_distance < self.success_dist).float() * 50.0
-            total_reward = distance_reward*(self.current_distance > self.success_dist) + (success_bonus*self.success_bonus_flag) #+ alignment_reward
+            distance_exp = torch.exp( - 1.0 * self.current_distance)
+            distance_reward = distance_trend*1000.0 + distance_exp*2.0
+            success_flag = torch.logical_and((self.current_distance < self.success_dist),(torch.norm(self.velocity, dim=-1, keepdim=True) <self.success_vel))
+            success_reward = success_flag.float() * 50.0
+            total_reward = (distance_reward*torch.logical_not(success_flag)) + (success_reward*self.success_bonus_flag) #+ alignment_reward
             #+ 0.5*forward_reward*self.success_buffer.unsqueeze(1)
             
             self.success_buffer =  self.success_buffer + (self.current_distance < self.success_dist)
-            self.success_bonus_flag = torch.logical_and(self.success_bonus_flag, self.current_distance >= self.success_dist)
+            self.success_bonus_flag = torch.logical_and(self.success_bonus_flag, torch.logical_not(success_flag))
             self.last_distance = self.current_distance
         return total_reward 
 
@@ -170,6 +173,15 @@ class OmniRobotEnv(DirectRLEnv):
         return False, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
+        print("Success Arrived Number: ", self.cfg.scene.num_envs-self.success_bonus_flag.sum().item())
+        # if self.current_distance is not None: 
+        #     mask = self.success_bonus_flag.bool()
+        #     valid_distances = (self.current_distance[mask.squeeze()]).unsqueeze(1)
+        #     print("Failed Car current distance: ", valid_distances)
+        #     command_loc = self.marker_loc[mask.squeeze()].unsqueeze(1)
+        #     print("Failed Car command location: ", command_loc)
+
+
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         super()._reset_idx(env_ids)
@@ -186,16 +198,24 @@ class OmniRobotEnv(DirectRLEnv):
         offsets = torch.pi*plus - torch.pi*minus
         self.yaws[env_ids] = torch.atan(ratio).reshape(-1,1) + offsets.reshape(-1,1)
 
+        self.marker_locations = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_offset = torch.zeros((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_offset[:,-1] = 0.5
+
+        self.marker_loc = torch.randn((self.cfg.scene.num_envs, 3)).cuda()
+        self.marker_loc[:,-1] = 0.5
+        self.marker_loc = self.marker_loc + self.env_origins
+
         default_root_state = self.robot.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
         self.robot.write_root_state_to_sim(default_root_state, env_ids)
         self._visualize_markers()
 
+
+
         self.last_distance = None
         self.current_distance = None
-        print("Success Now Arrived Number: ", self.success_buffer.sum().item())
-        print("Success Previous Arrived Number: ", self.cfg.scene.num_envs-self.success_bonus_flag.sum().item())
         self.success_buffer=torch.zeros((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
         self.success_bonus_flag = torch.ones((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
         self.reset_flag = True
