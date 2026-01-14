@@ -10,18 +10,18 @@ from isaaclab.utils import configclass
 class OmniRobotEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 2
-    episode_length_s = 5.0
+    episode_length_s = 10.0
     # - spaces definition
     action_space = 4
     # observation_space = 9
-    observation_space = 3
+    observation_space = 8
     state_space = 0
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
     # robot(s)
     robot_cfg: ArticulationCfg = OMNIROBOT_CONFIG.replace(prim_path="/World/envs/env_.*/Robot")
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=100, env_spacing=4.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=100, env_spacing=5.0, replicate_physics=True)
     
     dof_names = [
         "fl_joint","fr_joint","rl_joint","rr_joint",

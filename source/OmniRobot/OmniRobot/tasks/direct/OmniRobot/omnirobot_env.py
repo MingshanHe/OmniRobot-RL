@@ -97,6 +97,14 @@ class OmniRobotEnv(DirectRLEnv):
         self.success_bonus_flag = torch.ones(self.cfg.scene.num_envs, device=self.device, dtype=torch.bool)
         self.success_dist = 0.05
         self.success_vel  = 0.1
+
+        self.reach_wp_buffer = torch.zeros(self.cfg.scene.num_envs, device=self.device, dtype=torch.bool)
+        self.reach_wp_bonus_flag = torch.ones(self.cfg.scene.num_envs, device=self.device, dtype=torch.bool)
+        self.reach_wp_dist = 0.1
+
+        self.task_failed = torch.zeros((self.cfg.scene.num_envs,), device=self.device, dtype=torch.bool)
+        self.success = torch.zeros((self.cfg.scene.num_envs,), device=self.device, dtype=torch.bool)
+        self.prev_lin_vel = torch.zeros((self.num_envs, 3), device=self.device)
         
 
     def _visualize_markers(self):
@@ -132,9 +140,19 @@ class OmniRobotEnv(DirectRLEnv):
         forward_speed = self.robot.data.root_com_lin_vel_b[:,0].reshape(-1,1)
         # obs = torch.hstack((dot, cross, forward_speed))
 
+        ang_vel_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w, self.robot.data.root_ang_vel_w)
+        gyro_z = ang_vel_b[:, 2:3]
+
+        world_accel = (self.robot.data.root_lin_vel_w - self.prev_lin_vel) / self.cfg.sim.dt
+        proper_accel_b = math_utils.quat_apply_inverse(self.robot.data.root_quat_w,
+                                                  world_accel - torch.tensor([0.0, 0.0, -9.81], device=self.device))
+        accel_xy = proper_accel_b[:, 0:2] / 9.81
+        self.prev_lin_vel = self.robot.data.root_lin_vel_w.clone()
+
+        
         distance =  (self.forward_marker_locations - self.command_marker_locations)[:, :2]
         distance_norm = torch.norm((self.forward_marker_locations - self.command_marker_locations)[:, :2], dim=-1, keepdim=True)
-        obs = torch.hstack((distance,distance_norm))
+        obs = torch.hstack((distance, distance_norm, gyro_z, accel_xy, dot, cross))
         # obs = torch.hstack((distance, dot, cross))
         # observations = {"policy": obs}
         
@@ -154,18 +172,48 @@ class OmniRobotEnv(DirectRLEnv):
             total_reward = torch.zeros((self.cfg.scene.num_envs)).cuda()
             self.reset_flag = False
         else:
-            distance_trend = self.last_distance - self.current_distance
+            # distance_trend = self.last_distance - self.current_distance
+            # distance_exp = torch.exp( - 1.0 * self.current_distance)
+            # distance_reward = distance_trend*1000.0 + distance_exp*2.0
+            # success_flag = torch.logical_and((self.current_distance < self.success_dist),(torch.norm(self.velocity, dim=-1, keepdim=True) <self.success_vel))
+            # success_reward = success_flag.float() * 50.0
+            # total_reward = (distance_reward*torch.logical_not(success_flag)) + (success_reward*self.success_bonus_flag) #+ alignment_reward
+            
+            progress_reward = self.last_distance - self.current_distance
+
             distance_exp = torch.exp( - 1.0 * self.current_distance)
-            distance_reward = distance_trend*1000.0 + distance_exp*2.0
+            
+            alignment_reward = torch.sum(self.forwards * self.commands, dim=-1, keepdim=True)
+            
+            reach_wp_flag = (self.current_distance < self.reach_wp_dist)
+            reach_wp_reward = reach_wp_flag.float() * 1.0
+
             success_flag = torch.logical_and((self.current_distance < self.success_dist),(torch.norm(self.velocity, dim=-1, keepdim=True) <self.success_vel))
-            success_reward = success_flag.float() * 50.0
-            total_reward = (distance_reward*torch.logical_not(success_flag)) + (success_reward*self.success_bonus_flag) #+ alignment_reward
-            #+ 0.5*forward_reward*self.success_buffer.unsqueeze(1)
+            success_reward = success_flag.float() * 1.0
+            total_reward = (
+                1000.0 * progress_reward
+                + 2.0 * distance_exp
+                # + 1.0 * velocity_reward
+                + 1.0 * alignment_reward
+                # + 0.1 * spaciousness_reward lidar
+                + 10.0 * reach_wp_reward*self.reach_wp_bonus_flag
+                + 100.0 * success_reward*self.success_bonus_flag
+                # - 10.0 * proximity_penalty
+                # - 2.0 * spin_penalty
+                # - 0.5 * steer_jerk_penalty
+                # - 5.0 * stall_penalty
+                # - 50.0 * crashed
+                # - 5.0 * self.task_failed
+            )
             
             self.success_buffer =  self.success_buffer + (self.current_distance < self.success_dist)
             self.success_bonus_flag = torch.logical_and(self.success_bonus_flag, torch.logical_not(success_flag))
+            self.reach_wp_buffer =  self.reach_wp_buffer + (self.current_distance < self.reach_wp_dist)
+            self.reach_wp_bonus_flag = torch.logical_and(self.reach_wp_bonus_flag, torch.logical_not(reach_wp_flag))
             self.last_distance = self.current_distance
         return total_reward 
+
+
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         #时间到达了
@@ -173,6 +221,7 @@ class OmniRobotEnv(DirectRLEnv):
         return False, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
+        print("Reach WP Number: ", self.cfg.scene.num_envs-self.reach_wp_bonus_flag.sum().item())
         print("Success Arrived Number: ", self.cfg.scene.num_envs-self.success_bonus_flag.sum().item())
         # if self.current_distance is not None: 
         #     mask = self.success_bonus_flag.bool()
@@ -218,4 +267,8 @@ class OmniRobotEnv(DirectRLEnv):
         self.current_distance = None
         self.success_buffer=torch.zeros((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
         self.success_bonus_flag = torch.ones((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
+        self.reach_wp_buffer=torch.zeros((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
+        self.reach_wp_bonus_flag = torch.ones((self.cfg.scene.num_envs,1), device=self.device, dtype=torch.bool)
         self.reset_flag = True
+        self.task_failed[env_ids] = False
+        self.prev_lin_vel[env_ids] = 0
